@@ -2,76 +2,277 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>固定位置WebAR</title>
+    <title>マーカー起動＋空間固定AR</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 </head>
-<body style="margin: 0; overflow: hidden">
-    <a-scene embedded arjs vr-mode-ui="enabled: false">
-        
-        <!-- 标记 -->
-        <a-marker preset="hiro" id="marker" emitevents="true">
+<body style="margin: 0; overflow: hidden;">
+    <!-- ステップ1: AR.js マーカー認識モード -->
+    <a-scene 
+        id="ar-scene"
+        embedded 
+        arjs 
+        vr-mode-ui="enabled: false"
+        style="display: block;"
+    >
+        <a-marker preset="hiro" id="starter-marker">
             <a-entity 
-                id="floating-model"
-                gltf-model="4.glb"
-                scale="0.3 0.3 0.3"
-                visible="true"
+                id="trigger-entity"
+                visible="false"
             ></a-entity>
         </a-marker>
-        
-        <!-- 固定在标记位置的模型（初始隐藏） -->
-        <a-entity
-            id="fixed-model"
-            gltf-model="4.glb"
-            scale="0.3 0.3 0.3"
-            visible="false"
-        ></a-entity>
-        
         <a-entity camera></a-entity>
     </a-scene>
+    
+    <!-- ステップ2: デバイス方向モード（初期非表示） -->
+    <a-scene 
+        id="device-scene"
+        vr-mode-ui="enabled: false"
+        style="display: none;"
+    >
+        <a-entity
+            id="world-model"
+            gltf-model="4.glb"
+            scale="0.01 0.01 0.01"
+            position="0 0 -1.5"
+            visible="true"
+        ></a-entity>
+        
+        <!-- 背景を現実のカメラ映像に -->
+        <a-entity geometry="primitive: plane; height: 20; width: 20" 
+                  material="shader: flat; src: #camera-texture;"
+                  position="0 0 -5"
+                  rotation="0 0 0"></a-entity>
+        
+        <a-entity
+            camera
+            look-controls="enabled: false"
+            wasd-controls="enabled: false"
+            position="0 0 0"
+        ></a-entity>
+    </a-scene>
+
+    <!-- カメラテクスチャ用 -->
+    <video id="camera-video" autoplay style="display: none; width: 100px; height: 100px;"></video>
+    
+    <!-- 画面表示 -->
+    <div id="instruction" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: white; font-family: 'Hiragino Sans', sans-serif; z-index: 1000; pointer-events: none;">
+        <div style="background: rgba(0,0,0,0.8); padding: 30px; border-radius: 15px;">
+            <div style="font-size: 24px; margin-bottom: 20px;">🎯 AR体験</div>
+            <div id="step1" style="font-size: 18px;">
+                1. Hiroマーカーをスキャンしてください
+            </div>
+            <div id="step2" style="font-size: 18px; display: none;">
+                2. スマホを動かしてモデルを見て回れます
+            </div>
+        </div>
+    </div>
 
     <script>
-        let isModelFixed = false;
-        const marker = document.querySelector('#marker');
-        const floatingModel = document.querySelector('#floating-model');
-        const fixedModel = document.querySelector('#fixed-model');
+        let isARStarted = false;
+        let cameraStream = null;
         
-        // 当标记被识别时
-        marker.addEventListener('markerFound', function() {
-            console.log('标记识别成功');
-            
-            if (!isModelFixed) {
-                // 第一次识别时，记录标记位置并固定模型
-                const markerPosition = marker.getAttribute('position');
-                const markerRotation = marker.getAttribute('rotation');
-                
-                // 设置固定模型的位置和旋转
-                fixedModel.setAttribute('position', markerPosition);
-                fixedModel.setAttribute('rotation', markerRotation);
-                fixedModel.setAttribute('visible', 'true');
-                
-                // 隐藏浮动模型
-                floatingModel.setAttribute('visible', 'false');
-                
-                isModelFixed = true;
-                console.log('模型已固定在标记位置');
+        // マーカー検出時の処理
+        document.querySelector('#starter-marker').addEventListener('markerFound', function() {
+            if (!isARStarted) {
+                startARExperience();
             }
         });
         
-        // 当标记丢失时（视角挪开）
-        marker.addEventListener('markerLost', function() {
-            console.log('标记丢失，但固定模型保持在原位置');
-            // 固定模型继续保持显示，浮动模型隐藏
-            floatingModel.setAttribute('visible', 'false');
+        async function startARExperience() {
+            isARStarted = true;
+            
+            // カメラストリームを取得
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                
+                // カメラ映像をテクスチャとして設定
+                const video = document.getElementById('camera-video');
+                video.srcObject = cameraStream;
+                
+            } catch (error) {
+                console.error('カメラアクセスエラー:', error);
+            }
+            
+            // シーン切り替え
+            document.getElementById('ar-scene').style.display = 'none';
+            document.getElementById('device-scene').style.display = 'block';
+            
+            // 表示を更新
+            document.getElementById('step1').style.display = 'none';
+            document.getElementById('step2').style.display = 'block';
+            document.getElementById('instruction').style.top = '20px';
+            document.getElementById('instruction').style.transform = 'translate(-50%, 0)';
+            
+            // デバイス方向センサーを有効化
+            enableDeviceOrientation();
+            
+            console.log('🚀 AR体験を開始しました');
+            console.log('📱 スマホを動かしてモデルを観察してください');
+        }
+        
+        function enableDeviceOrientation() {
+            const camera = document.querySelector('#device-scene [camera]');
+            
+            if (typeof DeviceOrientationEvent !== 'undefined' && 
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            setupDeviceOrientation(camera);
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Android
+                setupDeviceOrientation(camera);
+            }
+        }
+        
+        function setupDeviceOrientation(camera) {
+            let initialAlpha = null;
+            let isCalibrated = false;
+            
+            window.addEventListener('deviceorientation', (event) => {
+                if (!isCalibrated) {
+                    initialAlpha = event.alpha;
+                    isCalibrated = true;
+                    return;
+                }
+                
+                const alpha = event.alpha - (initialAlpha || 0);
+                const beta = event.beta;
+                const gamma = event.gamma;
+                
+                // カメラの回転をデバイス方向に連動
+                camera.setAttribute('rotation', {
+                    x: THREE.MathUtils.clamp(beta - 90, -180, 180),
+                    y: THREE.MathUtils.clamp(alpha, -180, 180),
+                    z: THREE.MathUtils.clamp(-gamma, -45, 45)
+                });
+            });
+            
+            console.log('✅ デバイス方向センサーを有効化しました');
+        }
+        
+        // モデル操作機能
+        AFRAME.registerComponent('model-controls', {
+            init: function() {
+                this.model = this.el;
+                this.initialScale = 0.01;
+                this.currentScale = this.initialScale;
+                this.setupInteractions();
+            },
+            
+            setupInteractions: function() {
+                const scene = this.model.sceneEl;
+                
+                // タッチ操作
+                let isRotating = false;
+                let lastTouchX = 0;
+                let initialPinchDistance = 0;
+                let initialScale = this.initialScale;
+                
+                scene.addEventListener('touchstart', (evt) => {
+                    if (evt.touches.length === 1) {
+                        isRotating = true;
+                        lastTouchX = evt.touches[0].clientX;
+                    }
+                    
+                    if (evt.touches.length === 2) {
+                        initialPinchDistance = this.getTouchDistance(evt.touches);
+                        initialScale = this.currentScale;
+                    }
+                });
+                
+                scene.addEventListener('touchmove', (evt) => {
+                    evt.preventDefault();
+                    
+                    // 回転
+                    if (isRotating && evt.touches.length === 1) {
+                        const deltaX = evt.touches[0].clientX - lastTouchX;
+                        const currentRotation = this.model.getAttribute('rotation');
+                        this.model.setAttribute('rotation', {
+                            x: currentRotation.x,
+                            y: currentRotation.y + deltaX * 0.5,
+                            z: currentRotation.z
+                        });
+                        lastTouchX = evt.touches[0].clientX;
+                    }
+                    
+                    // スケール
+                    if (evt.touches.length === 2) {
+                        const currentDistance = this.getTouchDistance(evt.touches);
+                        const scaleRatio = currentDistance / initialPinchDistance;
+                        this.currentScale = Math.max(0.005, Math.min(0.05, initialScale * scaleRatio));
+                        this.model.setAttribute('scale', {
+                            x: this.currentScale,
+                            y: this.currentScale,
+                            z: this.currentScale
+                        });
+                    }
+                });
+                
+                scene.addEventListener('touchend', () => {
+                    isRotating = false;
+                });
+            },
+            
+            getTouchDistance: function(touches) {
+                const dx = touches[0].clientX - touches[1].clientX;
+                const dy = touches[0].clientY - touches[1].clientY;
+                return Math.sqrt(dx * dx + dy * dy);
+            }
         });
         
-        // 双击屏幕重置（可以重新定位）
-        document.querySelector('a-scene').addEventListener('dblclick', function() {
-            fixedModel.setAttribute('visible', 'false');
-            floatingModel.setAttribute('visible', 'true');
-            isModelFixed = false;
-            console.log('已重置，重新扫描标记可再次固定模型');
+        // カメラテクスチャシェーダー
+        AFRAME.registerShader('flat', {
+            schema: {
+                src: {type: 'map', is: 'uniform'}
+            },
+            init: function (data) {
+                const texture = new THREE.VideoTexture(document.getElementById('camera-video'));
+                texture.minFilter = THREE.LinearFilter;
+                
+                this.material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide
+                });
+            }
+        });
+        
+        // 初期化
+        window.addEventListener('load', function() {
+            const model = document.querySelector('#world-model');
+            model.setAttribute('model-controls', '');
+            
+            console.log('🎯 マーカー起動＋空間固定AR 準備完了');
+            console.log('📱 Hiroマーカーをスキャンしてください');
         });
     </script>
+    
+    <style>
+        body {
+            font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            background: #000;
+            margin: 0;
+            padding: 0;
+        }
+        
+        a-scene {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
 </body>
 </html>
